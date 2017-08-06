@@ -496,10 +496,10 @@ void Ekf2::run()
 	fds[0].fd = sensors_sub;
 	fds[0].events = POLLIN;
 
-	// initialise parameter cache
+	// 初始化参数缓存initialise parameter cache
 	updateParams();
 
-	// initialize data structures outside of loop
+	// 初始化循环外的数据结构 initialize data structures outside of loop
 	// because they will else not always be
 	// properly populated
 	sensor_combined_s sensors = {};
@@ -519,20 +519,21 @@ void Ekf2::run()
 		int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
 
 		if (!(fds[0].revents & POLLIN)) {
-			// no new data
+			// 没有新数据no new data
 			continue;
 		}
 
 		if (ret < 0) {
-			// Poll error, sleep and try again
+			// POLL错误，重试  Poll error, sleep and try again
 			usleep(10000);
 			continue;
 
 		} else if (ret == 0) {
-			// Poll timeout or no new data, do nothing
+			// POLL超时/没有新数据 不做任何事 Poll timeout or no new data, do nothing
 			continue;
 		}
 
+		//检查是否有更新信息，若更新则覆盖掉原有数据。
 		bool params_updated = false;
 		orb_check(params_sub, &params_updated);
 
@@ -553,7 +554,7 @@ void Ekf2::run()
 		bool vehicle_status_updated = false;
 
 		orb_copy(ORB_ID(sensor_combined), sensors_sub, &sensors);
-		// update all other topics if they have new data
+		// 如果有新数据 更新 update all other topics if they have new data
 
 		orb_check(status_sub, &vehicle_status_updated);
 
@@ -602,7 +603,7 @@ void Ekf2::run()
 			orb_copy(ORB_ID(vehicle_vision_attitude), ev_att_sub, &ev_att);
 		}
 
-		// in replay mode we are getting the actual timestamp from the sensor topic
+		// 在replay模式下，我们从传感器中获取实际的时间戳 in replay mode we are getting the actual timestamp from the sensor topic
 		hrt_abstime now = 0;
 
 		if (_replay_mode) {
@@ -612,7 +613,7 @@ void Ekf2::run()
 			now = hrt_absolute_time();
 		}
 
-		// push imu data into estimator
+		// 将IMU数据推送到估计器中 push imu data into estimator
 		float gyro_integral[3];
 		float gyro_dt = sensors.gyro_integral_dt / 1.e6f;
 		gyro_integral[0] = sensors.gyro_rad[0] * gyro_dt;
@@ -626,9 +627,9 @@ void Ekf2::run()
 		_ekf.setIMUData(now, sensors.gyro_integral_dt, sensors.accelerometer_integral_dt,
 				gyro_integral, accel_integral);
 
-		// read mag data
+		// 读磁力计中数据 read mag data
 		if (sensors.magnetometer_timestamp_relative == sensor_combined_s::RELATIVE_TIMESTAMP_INVALID) {
-			// set a zero timestamp to let the ekf replay program know that this data is not valid
+			// 设置零时间戳以让ekf replay知道此数据无效 set a zero timestamp to let the ekf replay program know that this data is not valid
 			_timestamp_mag_us = 0;
 
 		} else {
@@ -668,6 +669,7 @@ void Ekf2::run()
 					PX4_INFO("Mag sensor ID changed to %i", _mag_bias_id.get());
 				}
 
+				// 如果EKF最后使用的时间少于指定的时间，则累加数据，并在达到指定的间隔时推送平均值。
 				// If the time last used by the EKF is less than specified, then accumulate the
 				// data and push the average when the specified interval is reached.
 				_mag_time_sum_ms += _timestamp_mag_us / 1000;
@@ -696,7 +698,7 @@ void Ekf2::run()
 			}
 		}
 
-		// read baro data
+		// 读取气压计数据 read baro data
 		if (sensors.baro_timestamp_relative == sensor_combined_s::RELATIVE_TIMESTAMP_INVALID) {
 			// set a zero timestamp to let the ekf replay program know that this data is not valid
 			_timestamp_balt_us = 0;
@@ -713,16 +715,16 @@ void Ekf2::run()
 				uint32_t balt_time_ms = _balt_time_sum_ms / _balt_sample_count;
 
 				if (balt_time_ms - _balt_time_ms_last_used > (uint32_t)_params->sensor_interval_min_ms) {
-					// take mean across sample period
+					// 在抽样期间取平均值take mean across sample period
 					float balt_data_avg = _balt_data_sum / (float)_balt_sample_count;
 
-					// estimate air density assuming typical 20degC ambient temperature
+					// 估计空气密度(20度环境温度) estimate air density assuming typical 20degC ambient temperature
 					orb_copy(ORB_ID(sensor_baro), sensor_baro_sub, &sensor_baro);
 					const float pressure_to_density = 100.0f / (CONSTANTS_AIR_GAS_CONST * (20.0f - CONSTANTS_ABSOLUTE_NULL_CELSIUS));
 					float rho = pressure_to_density * sensor_baro.pressure;
 					_ekf.set_air_density(rho);
 
-					// calculate static pressure error = Pmeas - Ptruth
+					// 计算静压误差= Pmeas - Ptruthcalculate static pressure error = Pmeas - Ptruth
 					// model position error sensitivity as a body fixed ellipse with different scale in the positive and negtive X direction
 					float max_airspeed_sq = _aspd_max.get();
 					max_airspeed_sq *= max_airspeed_sq;
@@ -739,7 +741,7 @@ void Ekf2::run()
 									  _K_pstatic_coef_y.get() * fminf(_vel_body_wind(1) * _vel_body_wind(1), max_airspeed_sq) +
 									  _K_pstatic_coef_z.get() * fminf(_vel_body_wind(2) * _vel_body_wind(2), max_airspeed_sq));
 
-					// correct baro measurement using pressure error estimate and assuming sea level gravity
+					// 使用气压计误差估计并假设海平面重力来进行正确的气压测量correct baro measurement using pressure error estimate and assuming sea level gravity
 					balt_data_avg += pstatic_err / (rho * 9.80665f);
 
 					// push to estimator
@@ -753,7 +755,7 @@ void Ekf2::run()
 			}
 		}
 
-		// read gps data if available
+		// 读取gps数据read gps data if available
 		if (gps_updated) {
 			struct gps_message gps_msg = {};
 			gps_msg.time_usec = gps.timestamp;
@@ -777,7 +779,7 @@ void Ekf2::run()
 
 		}
 
-		// only set airspeed data if condition for airspeed fusion are met
+		// 只有满足空速融合条件时才设置空速数据 only set airspeed data if condition for airspeed fusion are met
 		bool fuse_airspeed = airspeed_updated && !vehicle_status.is_rotary_wing
 				     && _arspFusionThreshold.get() <= airspeed.true_airspeed_m_s && _arspFusionThreshold.get() >= 0.1f;
 
@@ -786,11 +788,11 @@ void Ekf2::run()
 			_ekf.setAirspeedData(airspeed.timestamp, airspeed.true_airspeed_m_s, eas2tas);
 		}
 
-		// only fuse synthetic sideslip measurements if conditions are met
+		// 只有满足条件才能合成侧滑测量only fuse synthetic sideslip measurements if conditions are met
 		bool fuse_beta = !vehicle_status.is_rotary_wing && _fuseBeta.get();
 		_ekf.set_fuse_beta_flag(fuse_beta);
 
-		// let the EKF know if the vehicle motion is that of a fixed wing (forward flight only relative to wind)
+		// 让EKF知道飞行器运动是否是固定翼的运动（向前飞行只相对于风）let the EKF know if the vehicle motion is that of a fixed wing (forward flight only relative to wind)
 		_ekf.set_is_fixed_wing(!vehicle_status.is_rotary_wing);
 
 		if (optical_flow_updated) {
@@ -813,8 +815,8 @@ void Ekf2::run()
 			_ekf.setRangeData(range_finder.timestamp, range_finder.current_distance);
 		}
 
-		// get external vision data
-		// if error estimates are unavailable, use parameter defined defaults
+		// 获得外部视觉（系统0）数据 get external vision data
+		// 如果错误估计不可用，使用参数定义的默认值if error estimates are unavailable, use parameter defined defaults
 		if (vision_position_updated || vision_attitude_updated) {
 			ext_vision_message ev_data;
 			ev_data.posNED(0) = ev_pos.x;
@@ -838,7 +840,7 @@ void Ekf2::run()
 			_ekf.set_in_air_status(!vehicle_land_detected.landed);
 		}
 
-		// run the EKF update and output
+		//运行EKF更新并输出 run the EKF update and output
 		if (_ekf.update()) {
 
 			// integrate time to monitor time slippage
